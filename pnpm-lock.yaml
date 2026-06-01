@@ -17,9 +17,9 @@ importers:
       '@triton-one/yellowstone-grpc':
         specifier: ^5.0.8
         version: 5.0.8(typescript@6.0.3)
-      anthropic:
-        specifier: ^0.0.0
-        version: 0.0.0
+      bs58:
+        specifier: ^6.0.0
+        version: 6.0.0
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -474,9 +474,6 @@ packages:
   ansi-styles@4.3.0:
     resolution: {integrity: sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg==}
     engines: {node: '>=8'}
-
-  anthropic@0.0.0:
-    resolution: {integrity: sha512-f5q/E0ZTR079xtkh58gFQ5chyLiRYgSoVDGA/hWacvU1DzVt+anoN8tEtTwWbmav6/+w/fFMNMj7r/KAMdOIYw==}
 
   base-x@3.0.11:
     resolution: {integrity: sha512-xz7wQ8xDhdyP7tQxwdteLYeFfS68tSMNCZ/Y37WJ4bhGfKPpqEIlmIyueQHqOyoPhE6xNUqjzRr8ra0eF9VRvA==}
@@ -1207,8 +1204,6 @@ snapshots:
   ansi-styles@4.3.0:
     dependencies:
       color-convert: 2.0.1
-
-  anthropic@0.0.0: {}
 
   base-x@3.0.11:
     dependencies:

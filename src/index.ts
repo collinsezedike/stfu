@@ -1,7 +1,10 @@
 import "dotenv/config";
-import { Connection } from "@solana/web3.js";
+import { Connection, Keypair } from "@solana/web3.js";
+import bs58 from "bs58";
 import { SlotStream, SlotUpdate } from "./stream/index.js";
-import { LifecycleTracker } from "./tracker/index.js";
+import { LifecycleTracker, TxLifecycle } from "./tracker/index.js";
+import { BundleSubmitter, BundleSubmission, BundleResult } from "./bundle/index.js";
+import { TipAgent } from "./agent/index.js";
 
 function requireEnv(key: string): string {
   const val = process.env[key];
@@ -10,18 +13,30 @@ function requireEnv(key: string): string {
 }
 
 async function main() {
-  const endpoint = requireEnv("GEYSER_ENDPOINT");
-  const token = process.env["GEYSER_TOKEN"] ?? "";
-  const rpcUrl = process.env["RPC_URL"] ?? "https://api.mainnet-beta.solana.com";
+  const endpoint         = requireEnv("GEYSER_ENDPOINT");
+  const token            = process.env["GEYSER_TOKEN"] ?? "";
+  const rpcUrl           = process.env["RPC_URL"] ?? "https://api.mainnet-beta.solana.com";
+  const blockEngineUrl   = requireEnv("JITO_BLOCK_ENGINE_URL");
+  const privateKey       = requireEnv("WALLET_PRIVATE_KEY");
+  const anthropicKey     = requireEnv("ANTHROPIC_API_KEY");
+  const tipFloor         = parseInt(process.env["TIP_FLOOR_LAMPORTS"] ?? "1000000", 10);
 
+  const payer     = Keypair.fromSecretKey(bs58.decode(privateKey));
   const connection = new Connection(rpcUrl, "confirmed");
-  const stream = new SlotStream(endpoint, token);
-  const tracker = new LifecycleTracker(connection);
 
+  const stream    = new SlotStream(endpoint, token);
+  const tracker   = new LifecycleTracker(connection);
+  const submitter = new BundleSubmitter(connection, payer, blockEngineUrl);
+  const agent     = new TipAgent(connection, anthropicKey, tipFloor);
+
+  let currentSlot = 0;
+
+  // --- Slot stream ---
   stream.on("connected", () => console.log("[main] Geyser stream connected"));
 
   stream.on("slot", (update: SlotUpdate) => {
     if (update.status === "processed") {
+      currentSlot = update.slot;
       tracker.updateSlot(update.slot);
       process.stdout.write(`\r[slot] ${update.slot}   `);
     } else {
@@ -29,12 +44,44 @@ async function main() {
     }
   });
 
-  stream.on("reconnecting", (attempt: number) => {
-    console.warn(`[main] Reconnecting... attempt ${attempt}`);
+  stream.on("reconnecting", (attempt: number) =>
+    console.warn(`\n[main] Reconnecting... attempt ${attempt}`)
+  );
+  stream.on("error", (err: Error) =>
+    console.error("\n[main] Stream error:", err.message)
+  );
+
+  // --- Bundle results ---
+  submitter.on("submitted", (sub: BundleSubmission) => {
+    for (const sig of sub.signatures) {
+      tracker.track(sig, sub.submittedSlot);
+    }
   });
 
-  stream.on("error", (err: Error) => {
-    console.error("[main] Stream error:", err.message);
+  submitter.on("accepted", (result: BundleResult) => {
+    console.log(`\n[main] Bundle ACCEPTED: ${result.uuid}`);
+  });
+
+  submitter.on("rejected", (result: BundleResult) => {
+    console.warn(`\n[main] Bundle REJECTED: ${result.uuid} — ${result.reason}`);
+  });
+
+  // --- Lifecycle events ---
+  tracker.on("confirmed", (tx: TxLifecycle) => {
+    const delta = (tx.confirmedAt! - tx.processedAt!);
+    console.log(`\n[main] ${tx.signature.slice(0, 8)}… confirmed | processed→confirmed: ${delta}ms`);
+  });
+
+  tracker.on("finalized", (tx: TxLifecycle) => {
+    console.log(`\n[main] ${tx.signature.slice(0, 8)}… finalized at slot ${tx.finalizedSlot}`);
+  });
+
+  tracker.on("dropped", (tx: TxLifecycle) => {
+    console.warn(`\n[main] ${tx.signature.slice(0, 8)}… DROPPED (no confirmation after ${tx.submittedSlot})`);
+  });
+
+  tracker.on("failed", (tx: TxLifecycle) => {
+    console.error(`\n[main] ${tx.signature.slice(0, 8)}… FAILED: ${tx.error}`);
   });
 
   tracker.start();
@@ -43,8 +90,12 @@ async function main() {
     console.log("\n[main] Shutting down...");
     stream.stop();
     tracker.stop();
+    submitter.destroy();
     process.exit(0);
   });
+
+  // Expose for programmatic use in tests / scripts
+  (globalThis as Record<string, unknown>).__stfu = { stream, tracker, submitter, agent, connection, payer, getCurrentSlot: () => currentSlot };
 
   await stream.start();
 }
