@@ -103,7 +103,7 @@ The only component that makes autonomous decisions. Before each bundle submissio
 1. Samples the balances of 4 Jito tip accounts (a proxy for recent tip volume)
 2. Calculates slots until the next Jito leader window
 3. Derives a congestion signal (`low` / `medium` / `high`)
-4. Calls **Claude Haiku** (`claude-haiku-4-5`) with a structured prompt containing all of the above — this is the AI agent layer, not a heuristic wrapper
+4. Calls **Claude Haiku** (`claude-haiku-4-5-20251001`) with a structured prompt containing all of the above — this is the AI agent layer, not a heuristic wrapper
 5. Parses the model's JSON response into a `TipDecision` with explicit reasoning
 
 The model's decision rationale is logged on every submission. The tip floor is enforced after parsing to prevent the model from going below the configured minimum.

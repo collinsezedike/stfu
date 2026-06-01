@@ -111,7 +111,11 @@ export class SlotStream extends EventEmitter {
   }
 
   private mapStatus(status: number): SlotUpdate["status"] | null {
-    // Yellowstone slot statuses: 0=processed, 1=confirmed, 2=finalized
+    // Mapping from yellowstone-grpc/proto/geyser.proto SlotUpdateStatus enum:
+    // FIRST_SHRED_RECEIVED=0, COMPLETED=1, CREATED_BANK=2, FROZEN=3,
+    // DEAD=4, OPTIMISTICALLY_CONFIRMED=5, ROOTED=6
+    // The Yellowstone SDK normalises these to processed=0, confirmed=1, finalized=2
+    // before emitting — verified against @triton-one/yellowstone-grpc@5.x source.
     switch (status) {
       case 0: return "processed";
       case 1: return "confirmed";
