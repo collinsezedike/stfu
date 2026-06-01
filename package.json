@@ -1,0 +1,38 @@
+{
+  "name": "stfu",
+  "version": "1.0.0",
+  "description": "Smart Transaction Forwarding Unit — Solana transaction infrastructure stack",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.32.1",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
+    "@solana/web3.js": "^1.98.4",
+    "@triton-one/yellowstone-grpc": "^5.0.8",
+    "dotenv": "^17.4.2",
+    "jito-ts": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "bigint-buffer",
+      "bufferutil",
+      "protobufjs",
+      "utf-8-validate",
+      "esbuild"
+    ]
+  }
+}
