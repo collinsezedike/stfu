@@ -127,6 +127,10 @@ pnpm demo   # end-to-end test run (~0.002 SOL)
 pnpm dev    # run the full stack continuously
 ```
 
+### Devnet
+
+The Yellowstone slot stream and lifecycle tracker work against any Solana cluster. Jito bundle submission requires mainnet — the Jito block engine does not operate on devnet. To test the stream and tracker without spending SOL, point `RPC_URL` and `GEYSER_ENDPOINT` at a devnet Geyser provider and comment out the bundle submission step in `src/demo.ts`.
+
 ### Step 1 — Geyser endpoint
 
 STFU requires a [Yellowstone gRPC](https://github.com/rpcpool/yellowstone-grpc) endpoint. The public Solana RPC does not provide one. Auth is required by every hosted provider.
@@ -208,14 +212,14 @@ Every completed bundle run (successful or failed) is written as a JSON record to
 }
 ```
 
-Slot numbers in these records are verifiable on [Solscan](https://solscan.io) and [SolanaFM](https://solana.fm). Cross-reference `processedSlot` against the block timestamp on-chain to confirm the log is real.
+> Sample only — see `logs/` for real run output. Slot numbers in actual records are verifiable on [Solscan](https://solscan.io) and [SolanaFM](https://solana.fm).
 
 **Triggering failure cases** for the log:
 
-| Failure | How to produce |
-|---|---|
-| `dropped` | Set `TIP_FLOOR_LAMPORTS=1` to submit a below-floor tip — Jito drops bundles with insufficient tips silently after ~150 slots |
-| `rejected` | Submit a bundle with a stale blockhash by artificially delaying before `sendBundle` — the block engine returns an immediate rejection |
+| Failure | How to produce | Time to manifest |
+|---|---|---|
+| `dropped` | Set `TIP_FLOOR_LAMPORTS=1000` (below Jito's ~1000 lamport effective floor) — the bundle is silently ignored and marked dropped after 150 slots | ~60 seconds — expected, not a hang |
+| `rejected` | Submit a bundle with a stale blockhash by adding a `sleep` before `sendBundle` — the block engine returns an immediate rejection | Immediate |
 
 ---
 
@@ -238,12 +242,6 @@ Use `confirmed` instead. It is only 1–2 slots behind the processed tip, well w
 Jito bundles are only eligible for inclusion in a specific leader's slot — they are submitted to the block engine with the expectation that the scheduled Jito-connected leader will pick them up. If that leader skips their slot (fails to produce a block), the bundle is silently dropped. The block engine does not requeue it.
 
 STFU detects this via the `SlotStream`: if the slot assigned to the next Jito leader advances past that leader's window without a corresponding block, the `LifecycleTracker` marks all associated signatures as `dropped` (no processed confirmation within 150 slots). The correct recovery is to re-query `getNextScheduledLeader`, rebuild the bundle against a fresh `confirmed` blockhash, re-run the tip agent for updated context, and resubmit.
-
----
-
-## Note on devnet
-
-The Yellowstone slot stream and lifecycle tracker work against any Solana cluster. Jito bundle submission requires mainnet — the Jito block engine does not operate on devnet. To test the stream and tracker in isolation without spending SOL, point `RPC_URL` and `GEYSER_ENDPOINT` at a devnet Geyser provider and comment out the bundle submission step in `src/demo.ts`.
 
 ---
 
