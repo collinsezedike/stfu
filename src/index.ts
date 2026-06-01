@@ -4,7 +4,6 @@ import bs58 from "bs58";
 import { SlotStream, SlotUpdate } from "./stream/index.js";
 import { LifecycleTracker, TxLifecycle } from "./tracker/index.js";
 import { BundleSubmitter, BundleSubmission, BundleResult } from "./bundle/index.js";
-import { TipAgent } from "./agent/index.js";
 
 function requireEnv(key: string): string {
   const val = process.env[key];
@@ -18,8 +17,6 @@ async function main() {
   const rpcUrl           = process.env["RPC_URL"] ?? "https://api.mainnet-beta.solana.com";
   const blockEngineUrl   = process.env["JITO_BLOCK_ENGINE_URL"] ?? "mainnet.block-engine.jito.wtf";
   const privateKey       = requireEnv("WALLET_PRIVATE_KEY");
-  const anthropicKey     = requireEnv("ANTHROPIC_API_KEY");
-  const tipFloor         = parseInt(process.env["TIP_FLOOR_LAMPORTS"] ?? "1000000", 10);
 
   const payer     = Keypair.fromSecretKey(bs58.decode(privateKey));
   const connection = new Connection(rpcUrl, "confirmed");
@@ -27,16 +24,12 @@ async function main() {
   const stream    = new SlotStream(endpoint, token);
   const tracker   = new LifecycleTracker(connection);
   const submitter = new BundleSubmitter(connection, payer, blockEngineUrl);
-  const agent     = new TipAgent(connection, anthropicKey, tipFloor);
-
-  let currentSlot = 0;
 
   // --- Slot stream ---
   stream.on("connected", () => console.log("[main] Geyser stream connected"));
 
   stream.on("slot", (update: SlotUpdate) => {
     if (update.status === "processed") {
-      currentSlot = update.slot;
       tracker.updateSlot(update.slot);
       process.stdout.write(`\r[slot] ${update.slot}   `);
     } else {
@@ -77,7 +70,7 @@ async function main() {
   });
 
   tracker.on("dropped", (tx: TxLifecycle) => {
-    console.warn(`\n[main] ${tx.signature.slice(0, 8)}… DROPPED (no confirmation after ${tx.submittedSlot})`);
+    console.warn(`\n[main] ${tx.signature.slice(0, 8)}… DROPPED (no confirmation within 150 slots of ${tx.submittedSlot})`);
   });
 
   tracker.on("failed", (tx: TxLifecycle) => {
@@ -93,9 +86,6 @@ async function main() {
     submitter.destroy();
     process.exit(0);
   });
-
-  // Expose for programmatic use in tests / scripts
-  (globalThis as Record<string, unknown>).__stfu = { stream, tracker, submitter, agent, connection, payer, getCurrentSlot: () => currentSlot };
 
   await stream.start();
 }

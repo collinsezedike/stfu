@@ -24,6 +24,7 @@ import { BundleSubmitter, BundleSubmission, BundleResult } from "./bundle/index.
 import { TipAgent } from "./agent/index.js";
 
 const FINALITY_TIMEOUT_MS = 120_000;
+const STREAM_CONNECT_TIMEOUT_MS = 15_000;
 
 function requireEnv(key: string): string {
   const val = process.env[key];
@@ -31,15 +32,15 @@ function requireEnv(key: string): string {
   return val;
 }
 
-function formatSlotDelta(a?: number, b?: number): string {
-  if (a == null || b == null) return "—";
-  return `+${b - a}ms`;
-}
-
 async function waitForSlot(stream: SlotStream): Promise<number> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error("Timed out waiting for first slot — check GEYSER_ENDPOINT and GEYSER_TOKEN")),
+      STREAM_CONNECT_TIMEOUT_MS
+    );
     const handler = (update: SlotUpdate) => {
       if (update.status === "processed") {
+        clearTimeout(timeout);
         stream.off("slot", handler);
         resolve(update.slot);
       }
