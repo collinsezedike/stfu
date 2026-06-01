@@ -1,5 +1,7 @@
 import "dotenv/config";
+import { Connection } from "@solana/web3.js";
 import { SlotStream, SlotUpdate } from "./stream/index.js";
+import { LifecycleTracker } from "./tracker/index.js";
 
 function requireEnv(key: string): string {
   const val = process.env[key];
@@ -10,18 +12,20 @@ function requireEnv(key: string): string {
 async function main() {
   const endpoint = requireEnv("GEYSER_ENDPOINT");
   const token = process.env["GEYSER_TOKEN"] ?? "";
+  const rpcUrl = process.env["RPC_URL"] ?? "https://api.mainnet-beta.solana.com";
 
+  const connection = new Connection(rpcUrl, "confirmed");
   const stream = new SlotStream(endpoint, token);
+  const tracker = new LifecycleTracker(connection);
 
-  stream.on("connected", () => {
-    console.log("[main] Geyser stream connected");
-  });
+  stream.on("connected", () => console.log("[main] Geyser stream connected"));
 
   stream.on("slot", (update: SlotUpdate) => {
     if (update.status === "processed") {
-      process.stdout.write(`\r[slot] ${update.slot} (${update.status})   `);
+      tracker.updateSlot(update.slot);
+      process.stdout.write(`\r[slot] ${update.slot}   `);
     } else {
-      console.log(`[slot] ${update.slot} → ${update.status}`);
+      console.log(`\n[slot] ${update.slot} → ${update.status}`);
     }
   });
 
@@ -33,9 +37,12 @@ async function main() {
     console.error("[main] Stream error:", err.message);
   });
 
+  tracker.start();
+
   process.on("SIGINT", () => {
     console.log("\n[main] Shutting down...");
     stream.stop();
+    tracker.stop();
     process.exit(0);
   });
 
