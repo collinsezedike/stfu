@@ -18,6 +18,7 @@ import {
 } from "@solana/web3.js";
 import bs58 from "bs58";
 import { SlotStream, SlotUpdate } from "./stream/index.js";
+import { writeLifecycleLog, getLogPath } from "./logger.js";
 import { LifecycleTracker, TxLifecycle } from "./tracker/index.js";
 import { BundleSubmitter, BundleSubmission, BundleResult } from "./bundle/index.js";
 import { TipAgent } from "./agent/index.js";
@@ -51,7 +52,7 @@ async function main() {
   const endpoint       = requireEnv("GEYSER_ENDPOINT");
   const token          = process.env["GEYSER_TOKEN"] ?? "";
   const rpcUrl         = process.env["RPC_URL"] ?? "https://api.mainnet-beta.solana.com";
-  const blockEngineUrl = requireEnv("JITO_BLOCK_ENGINE_URL");
+  const blockEngineUrl = process.env["JITO_BLOCK_ENGINE_URL"] ?? "mainnet.block-engine.jito.wtf";
   const privateKey     = requireEnv("WALLET_PRIVATE_KEY");
   const anthropicKey   = requireEnv("ANTHROPIC_API_KEY");
   const tipFloor       = parseInt(process.env["TIP_FLOOR_LAMPORTS"] ?? "1000000", 10);
@@ -219,6 +220,9 @@ async function main() {
   console.log(`  Agent note : "${decision.reasoning}"`);
   console.log(`\n  Explorer   : https://solscan.io/tx/${lifecycle.signature}`);
   console.log("━".repeat(60));
+
+  writeLifecycleLog({ ...lifecycle, tipLamports: decision.tipLamports, agentReasoning: decision.reasoning });
+  console.log(`  Log file   : ${getLogPath()}`);
 
   cleanup(stream, tracker, submitter);
 }

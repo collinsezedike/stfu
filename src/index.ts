@@ -16,7 +16,7 @@ async function main() {
   const endpoint         = requireEnv("GEYSER_ENDPOINT");
   const token            = process.env["GEYSER_TOKEN"] ?? "";
   const rpcUrl           = process.env["RPC_URL"] ?? "https://api.mainnet-beta.solana.com";
-  const blockEngineUrl   = requireEnv("JITO_BLOCK_ENGINE_URL");
+  const blockEngineUrl   = process.env["JITO_BLOCK_ENGINE_URL"] ?? "mainnet.block-engine.jito.wtf";
   const privateKey       = requireEnv("WALLET_PRIVATE_KEY");
   const anthropicKey     = requireEnv("ANTHROPIC_API_KEY");
   const tipFloor         = parseInt(process.env["TIP_FLOOR_LAMPORTS"] ?? "1000000", 10);
