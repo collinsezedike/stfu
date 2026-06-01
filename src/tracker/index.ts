@@ -140,6 +140,10 @@ export class LifecycleTracker extends EventEmitter {
   ): void {
     const sig = lifecycle.signature.slice(0, 8) + "…";
 
+    // These are plain `if` blocks, not `else if`, so a single poll returning
+    // `finalized` on a still-`submitted` tx cascades through all three stages
+    // in one call. This handles the common case where confirmation outpaces
+    // our 1s poll interval and we skip intermediate states entirely.
     if (
       (confirmationStatus === "processed" || confirmationStatus === "confirmed" || confirmationStatus === "finalized") &&
       lifecycle.status === "submitted"

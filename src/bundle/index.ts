@@ -88,8 +88,10 @@ export class BundleSubmitter extends EventEmitter {
     currentSlot: number
   ): Promise<BundleSubmission> {
     if (transactions.length === 0) throw new Error("No transactions to bundle");
+    // BUNDLE_TX_LIMIT is 5 total including the tip tx, so user txs are capped at 4.
+    // >= rather than > because addTipTx will push the count to BUNDLE_TX_LIMIT + 1.
     if (transactions.length >= BUNDLE_TX_LIMIT) {
-      throw new Error(`Bundle exceeds ${BUNDLE_TX_LIMIT} tx limit (tip tx needs one slot)`);
+      throw new Error(`Bundle exceeds ${BUNDLE_TX_LIMIT - 1} user tx limit (tip tx occupies one slot)`);
     }
 
     const tipAccounts = await this.getTipAccounts();
