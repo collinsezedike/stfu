@@ -124,21 +124,70 @@ const decision = await agent.decide(context);
 ```bash
 pnpm install
 cp .env.example .env
-# Fill in .env (see Environment Variables below)
-pnpm dev
+# Fill in .env — see steps below
+pnpm demo   # end-to-end test run (~0.002 SOL)
+pnpm dev    # run the full stack continuously
 ```
+
+### Step 1 — Geyser endpoint
+
+STFU requires a [Yellowstone gRPC](https://github.com/rpcpool/yellowstone-grpc) endpoint. The public Solana RPC does not provide one.
+
+| Provider | Notes |
+|---|---|
+| [Helius](https://helius.dev) | Business plan and above include gRPC |
+| [Triton One](https://triton.one) | Dedicated Yellowstone nodes |
+| [QuickNode](https://quicknode.com) | Yellowstone available as a marketplace add-on |
+
+Set the endpoint and token in `.env`:
+
+```
+GEYSER_ENDPOINT=https://your-region.helius-rpc.com/?api-key=YOUR_KEY
+GEYSER_TOKEN=YOUR_KEY
+RPC_URL=https://your-region.helius-rpc.com/?api-key=YOUR_KEY
+```
+
+### Step 2 — Wallet
+
+You need a mainnet wallet funded with at least **0.003 SOL** (tip + transaction fee + buffer). Generate one:
+
+```bash
+node -e "
+const { Keypair } = require('@solana/web3.js');
+const bs58 = require('bs58');
+const kp = Keypair.generate();
+console.log('Public key :', kp.publicKey.toBase58());
+console.log('Private key:', bs58.default.encode(kp.secretKey));
+"
+```
+
+Fund the public key from an exchange or another wallet, then add to `.env`:
+
+```
+WALLET_PRIVATE_KEY=<base58 private key>
+```
+
+### Step 3 — Remaining config
+
+```
+JITO_BLOCK_ENGINE_URL=mainnet.block-engine.jito.wtf
+ANTHROPIC_API_KEY=<from console.anthropic.com>
+TIP_FLOOR_LAMPORTS=1000000
+```
+
+`JITO_BLOCK_ENGINE_URL` is fixed for mainnet — no account needed.
 
 ### Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `GEYSER_ENDPOINT` | ✓ | Yellowstone gRPC endpoint (e.g. Helius, Triton) |
+| `GEYSER_ENDPOINT` | ✓ | Yellowstone gRPC endpoint |
 | `GEYSER_TOKEN` | — | Auth token for the Geyser endpoint |
 | `RPC_URL` | — | Solana RPC URL (defaults to mainnet public) |
-| `JITO_BLOCK_ENGINE_URL` | ✓ | Jito block engine host (e.g. `mainnet.block-engine.jito.wtf`) |
-| `WALLET_PRIVATE_KEY` | ✓ | Base58-encoded wallet private key (signs bundles + tip tx) |
+| `JITO_BLOCK_ENGINE_URL` | ✓ | `mainnet.block-engine.jito.wtf` |
+| `WALLET_PRIVATE_KEY` | ✓ | Base58-encoded private key, min 0.003 SOL balance |
 | `ANTHROPIC_API_KEY` | ✓ | API key for Claude Haiku tip decisions |
-| `TIP_FLOOR_LAMPORTS` | — | Minimum tip in lamports (default: 1,000,000) |
+| `TIP_FLOOR_LAMPORTS` | — | Minimum tip in lamports (default: 1,000,000 = 0.001 SOL) |
 
 ---
 
