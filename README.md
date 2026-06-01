@@ -2,8 +2,6 @@
 
 A production-grade Solana transaction infrastructure stack. STFU streams live slot data from a Geyser node, submits transaction bundles through Jito, tracks every bundle from submission to finality, and uses an AI agent to decide optimal tip amounts based on real-time network conditions.
 
-Built for the [Superteam Nigeria Advanced Infrastructure Challenge](https://superteam.fun/earn).
-
 ---
 
 ## Architecture
