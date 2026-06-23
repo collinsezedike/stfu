@@ -76,20 +76,35 @@ export class BundleSubmitter extends EventEmitter {
     return result.value.map((addr) => new PublicKey(addr));
   }
 
-  async getNextLeader(): Promise<{ currentSlot: number; nextLeaderSlot: number; nextLeaderIdentity: string }> {
+  async getNextLeader(): Promise<{
+    currentSlot: number;
+    nextLeaderSlot: number;
+    nextLeaderIdentity: string;
+  }> {
     const result = await this.client.getNextScheduledLeader();
     if (!result.ok) throw result.error;
     return result.value;
   }
 
+  /**
+   * Build and send a Jito bundle.
+   *
+   * @param transactions   User transactions to include (max 4; tip tx occupies the 5th slot)
+   * @param tipLamports    Tip amount decided by TipAgent
+   * @param currentSlot    Current slot from the Geyser stream (recorded in the submission)
+   * @param blockhash      Optional: shared blockhash already fetched by the caller.
+   *                       When provided, the same blockhash is used for the tip tx so
+   *                       both txs expire at the same slot. When omitted, a fresh
+   *                       "confirmed" blockhash is fetched internally.
+   */
   async submit(
     transactions: VersionedTransaction[],
     tipLamports: number,
-    currentSlot: number
+    currentSlot: number,
+    blockhash?: string
   ): Promise<BundleSubmission> {
     if (transactions.length === 0) throw new Error("No transactions to bundle");
     // BUNDLE_TX_LIMIT is 5 total including the tip tx, so user txs are capped at 4.
-    // >= rather than > because addTipTx will push the count to BUNDLE_TX_LIMIT + 1.
     if (transactions.length >= BUNDLE_TX_LIMIT) {
       throw new Error(`Bundle exceeds ${BUNDLE_TX_LIMIT - 1} user tx limit (tip tx occupies one slot)`);
     }
@@ -97,10 +112,11 @@ export class BundleSubmitter extends EventEmitter {
     const tipAccounts = await this.getTipAccounts();
     const tipAccount = tipAccounts[Math.floor(Math.random() * tipAccounts.length)]!;
 
-    const { blockhash } = await this.connection.getLatestBlockhash("confirmed");
+    const resolvedBlockhash =
+      blockhash ?? (await this.connection.getLatestBlockhash("confirmed")).blockhash;
 
     const b = new Bundle(transactions, BUNDLE_TX_LIMIT);
-    const withTip = b.addTipTx(this.payer, tipLamports, tipAccount, blockhash);
+    const withTip = b.addTipTx(this.payer, tipLamports, tipAccount, resolvedBlockhash);
     if (withTip instanceof Error) throw withTip;
 
     const result = await this.client.sendBundle(withTip);
@@ -108,6 +124,7 @@ export class BundleSubmitter extends EventEmitter {
 
     const uuid = result.value;
     const signatures = transactions.map((tx) => {
+      // tx.signatures[0] is always the fee-payer signature for versioned transactions
       const sig = tx.signatures[0];
       if (!sig) throw new Error("Transaction has no signature");
       return bs58.encode(sig);

@@ -67,6 +67,7 @@ export class SlotStream extends EventEmitter {
 
     return new Promise<void>((resolve, reject) => {
       stream.on("data", (update: SubscribeUpdate) => {
+        // Reset backoff on any successful data — we're clearly connected
         this.reconnectDelay = 1_000;
         this.reconnectAttempts = 0;
 
@@ -88,9 +89,6 @@ export class SlotStream extends EventEmitter {
       stream.on("end", resolve);
       stream.on("close", resolve);
 
-      this.emit("connected");
-      console.log("[stream] Connected to Geyser, subscribing to slots...");
-
       const request: SubscribeRequest = {
         slots: { slots: {} },
         accounts: {},
@@ -104,18 +102,29 @@ export class SlotStream extends EventEmitter {
         ping: undefined,
       };
 
-      stream.write(request as unknown as Parameters<typeof stream.write>[0], (err?: Error | null) => {
-        if (err) reject(err);
-      });
+      // The grpc-js duplex stream's write() signature uses its own internal
+      // request type, which doesn't align with the SDK's SubscribeRequest at
+      // the TypeScript level. The cast is safe — the runtime type is correct.
+      stream.write(
+        request as unknown as Parameters<typeof stream.write>[0],
+        (err?: Error | null) => {
+          if (err) {
+            reject(err);
+          } else {
+            // Emit "connected" only after the subscription write succeeds,
+            // not before — callers rely on this event to know the stream is live.
+            this.emit("connected");
+            console.log("[stream] Connected to Geyser, subscribing to slots...");
+          }
+        }
+      );
     });
   }
 
   private mapStatus(status: number): SlotUpdate["status"] | null {
-    // Mapping from yellowstone-grpc/proto/geyser.proto SlotUpdateStatus enum:
-    // FIRST_SHRED_RECEIVED=0, COMPLETED=1, CREATED_BANK=2, FROZEN=3,
-    // DEAD=4, OPTIMISTICALLY_CONFIRMED=5, ROOTED=6
-    // The Yellowstone SDK normalises these to processed=0, confirmed=1, finalized=2
-    // before emitting — verified against @triton-one/yellowstone-grpc@5.x source.
+    // The @triton-one/yellowstone-grpc SDK normalises the raw proto
+    // SlotUpdateStatus enum to processed=0, confirmed=1, finalized=2
+    // before surfacing it on the update object.
     switch (status) {
       case 0: return "processed";
       case 1: return "confirmed";
