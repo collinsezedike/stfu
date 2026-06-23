@@ -2,7 +2,7 @@
 
 A production-grade Solana transaction infrastructure stack. STFU streams live slot data from a Geyser node, submits transaction bundles through Jito, tracks every bundle from submission to finality, and uses an AI agent to decide optimal tip amounts based on real-time network fee pressure.
 
-**[Architecture Document →](#)** ← replace `#` with your Notion / Google Docs URL after hosting `logs/ARCHITECTURE.md` externally.
+**[Architecture Diagram →](https://excalidraw.com/#json=h0ka_xlD1SB5ggnJs99jO,yAPkRJnV_OxLaTDPQ4Q5Cw)**
 
 > **Mainnet only.** The Jito block engine does not operate on devnet. The Yellowstone slot stream and lifecycle tracker work on any cluster, but bundle submission requires mainnet. See [Devnet](#devnet) for partial testing options.
 
@@ -10,42 +10,7 @@ A production-grade Solana transaction infrastructure stack. STFU streams live sl
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        STFU Stack                               │
-│                                                                 │
-│  ┌──────────────┐   slot updates   ┌──────────────────────┐    │
-│  │ Geyser Node  │ ───────────────► │   SlotStream         │    │
-│  │ (Yellowstone │                  │   • reconnect/backoff│    │
-│  │   gRPC)      │                  │   • processed events │    │
-│  └──────────────┘                  └──────────┬───────────┘    │
-│                                               │ currentSlot    │
-│                                    ┌──────────▼───────────┐    │
-│  ┌──────────────┐   tip context    │   TipAgent (Claude)  │    │
-│  │  Jito Block  │ ◄──────────────  │   • P75 priority fees│    │
-│  │  Engine      │                  │   • congestion signal│    │
-│  │              │   sendBundle     │   • structured reason│    │
-│  │              │ ◄──────────────  └──────────────────────┘    │
-│  └──────┬───────┘                                              │
-│         │ BundleResult             ┌──────────────────────┐    │
-│         └────────────────────────► │  BundleSubmitter     │    │
-│                                    │  • shared blockhash  │    │
-│                                    │  • result streaming  │    │
-│                                    └──────────┬───────────┘    │
-│                                               │ signatures     │
-│  ┌──────────────┐  onSignature (WebSocket)    │                │
-│  │  Solana RPC  │ ◄───────────────────────────┤                │
-│  │              │  getSignatureStatuses        │                │
-│  │              │ ◄─────────────── (fallback) ─┤                │
-│  └──────┬───────┘                  ┌──────────▼───────────┐    │
-│         └────────────────────────► │  LifecycleTracker    │    │
-│                                    │  submitted           │    │
-│                                    │  → processed         │    │
-│                                    │  → confirmed         │    │
-│                                    │  → finalized/dropped │    │
-│                                    └──────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
-```
+![STFU Architecture](architecture.svg)
 
 **Data flow:**
 1. `SlotStream` opens a Yellowstone gRPC subscription and emits typed slot events
