@@ -8,13 +8,13 @@ A production-grade Solana transaction infrastructure stack. STFU streams live sl
 
 ## Architecture
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="architecture-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="architecture.svg">
-  <img src="architecture.svg" alt="STFU Architecture">
-</picture>
-
-[Interactive diagram →](https://excalidraw.com/#json=h0ka_xlD1SB5ggnJs99jO,yAPkRJnV_OxLaTDPQ4Q5Cw)
+<a href="https://excalidraw.com/#json=h0ka_xlD1SB5ggnJs99jO,yAPkRJnV_OxLaTDPQ4Q5Cw">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="architecture-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="architecture.svg">
+    <img src="architecture.svg" alt="STFU Architecture">
+  </picture>
+</a>
 
 **Data flow:**
 1. `SlotStream` opens a Yellowstone gRPC subscription and emits typed slot events
