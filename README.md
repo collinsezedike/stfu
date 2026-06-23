@@ -1,52 +1,59 @@
 # STFU — Smart Transaction Forwarding Unit
 
-A production-grade Solana transaction infrastructure stack. STFU streams live slot data from a Geyser node, submits transaction bundles through Jito, tracks every bundle from submission to finality, and uses an AI agent to decide optimal tip amounts based on real-time network conditions.
+A production-grade Solana transaction infrastructure stack. STFU streams live slot data from a Geyser node, submits transaction bundles through Jito, tracks every bundle from submission to finality, and uses an AI agent to decide optimal tip amounts based on real-time network fee pressure.
+
+**[Architecture Document →](#)** ← replace `#` with your Notion / Google Docs URL after hosting `logs/ARCHITECTURE.md` externally.
+
+> **Mainnet only.** The Jito block engine does not operate on devnet. The Yellowstone slot stream and lifecycle tracker work on any cluster, but bundle submission requires mainnet. See [Devnet](#devnet) for partial testing options.
 
 ---
 
 ## Architecture
 
 ```
- ┌─────────────────────────────────────────────────────────────────┐
- │                        STFU Stack                               │
- │                                                                 │
- │  ┌──────────────┐   slot updates   ┌──────────────────────┐    │
- │  │ Geyser Node  │ ───────────────► │   SlotStream         │    │
- │  │ (Yellowstone │                  │   • reconnect/backoff│    │
- │  │   gRPC)      │                  │   • processed events │    │
- │  └──────────────┘                  └──────────┬───────────┘    │
- │                                               │ currentSlot    │
- │                                    ┌──────────▼───────────┐    │
- │  ┌──────────────┐   tip context    │   TipAgent (Claude)  │    │
- │  │  Jito Block  │ ◄──────────────  │   • tip acct balances│    │
- │  │  Engine      │                  │   • congestion signal│    │
- │  │              │   sendBundle     │   • structured reason│    │
- │  │              │ ◄──────────────  └──────────────────────┘    │
- │  └──────┬───────┘                                              │
- │         │ BundleResult             ┌──────────────────────┐    │
- │         └────────────────────────► │  BundleSubmitter     │    │
- │                                    │  • tip tx injection  │    │
- │                                    │  • result streaming  │    │
- │                                    └──────────┬───────────┘    │
- │                                               │ signatures     │
- │  ┌──────────────┐  getSignatureStatuses       │                │
- │  │  Solana RPC  │ ◄────────────────────────── │                │
- │  └──────┬───────┘                  ┌──────────▼───────────┐    │
- │         │ confirmationStatus       │  LifecycleTracker    │    │
- │         └────────────────────────► │  submitted           │    │
- │                                    │  → processed         │    │
- │                                    │  → confirmed         │    │
- │                                    │  → finalized/dropped │    │
- │                                    └──────────────────────┘    │
- └─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        STFU Stack                               │
+│                                                                 │
+│  ┌──────────────┐   slot updates   ┌──────────────────────┐    │
+│  │ Geyser Node  │ ───────────────► │   SlotStream         │    │
+│  │ (Yellowstone │                  │   • reconnect/backoff│    │
+│  │   gRPC)      │                  │   • processed events │    │
+│  └──────────────┘                  └──────────┬───────────┘    │
+│                                               │ currentSlot    │
+│                                    ┌──────────▼───────────┐    │
+│  ┌──────────────┐   tip context    │   TipAgent (Claude)  │    │
+│  │  Jito Block  │ ◄──────────────  │   • P75 priority fees│    │
+│  │  Engine      │                  │   • congestion signal│    │
+│  │              │   sendBundle     │   • structured reason│    │
+│  │              │ ◄──────────────  └──────────────────────┘    │
+│  └──────┬───────┘                                              │
+│         │ BundleResult             ┌──────────────────────┐    │
+│         └────────────────────────► │  BundleSubmitter     │    │
+│                                    │  • shared blockhash  │    │
+│                                    │  • result streaming  │    │
+│                                    └──────────┬───────────┘    │
+│                                               │ signatures     │
+│  ┌──────────────┐  onSignature (WebSocket)    │                │
+│  │  Solana RPC  │ ◄───────────────────────────┤                │
+│  │              │  getSignatureStatuses        │                │
+│  │              │ ◄─────────────── (fallback) ─┤                │
+│  └──────┬───────┘                  ┌──────────▼───────────┐    │
+│         └────────────────────────► │  LifecycleTracker    │    │
+│                                    │  submitted           │    │
+│                                    │  → processed         │    │
+│                                    │  → confirmed         │    │
+│                                    │  → finalized/dropped │    │
+│                                    └──────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 **Data flow:**
 1. `SlotStream` opens a Yellowstone gRPC subscription and emits typed slot events
 2. Each processed slot feeds `currentSlot` into the `LifecycleTracker` (drop detection) and the `TipAgent` (timing context)
-3. Before submitting a bundle, `TipAgent` samples Jito tip account balances, estimates congestion, and calls Claude Haiku for a reasoned tip decision
-4. `BundleSubmitter` appends a tip transaction and calls `sendBundle` on the Jito block engine
-5. `LifecycleTracker` polls `getSignatureStatuses` every second, advancing each transaction through its state machine and logging real slot numbers + timestamps at every transition
+3. Before submitting a bundle, `TipAgent` calls `getRecentPrioritizationFees` to measure real fee pressure, then calls Claude Haiku for a reasoned tip decision
+4. One `confirmed` blockhash is fetched and shared by both the user tx and the tip tx, so they expire at the same slot
+5. `BundleSubmitter` appends a tip transaction and calls `sendBundle` on the Jito block engine
+6. `LifecycleTracker` opens WebSocket signature subscriptions (primary) and polls `getSignatureStatuses` every 5 seconds (fallback), advancing each transaction through its state machine and logging real slot numbers + timestamps at every transition
 
 ---
 
@@ -56,7 +63,7 @@ A production-grade Solana transaction infrastructure stack. STFU streams live sl
 
 Maintains a persistent gRPC subscription to a Geyser node. Emits `SlotUpdate` events for every `processed`, `confirmed`, and `finalized` slot.
 
-**Reconnection:** Uses exponential backoff (1s → 30s cap). On each reconnect, the gRPC client is fully recreated — reusing a stuck channel is a common source of silent failures.
+**Reconnection:** Exponential backoff (1 s → 30 s cap). On each reconnect, the gRPC client is fully recreated — reusing a stuck channel is a common source of silent failures. The `"connected"` event fires only after the subscription write is acknowledged, not before.
 
 ```ts
 const stream = new SlotStream(endpoint, token);
@@ -67,11 +74,15 @@ await stream.start();
 
 ### `src/tracker/` — Transaction Lifecycle Tracker
 
-State machine that tracks every submitted signature through its full confirmation lifecycle. Polls `getSignatureStatuses` every 1 second against the Solana RPC.
+State machine that tracks every submitted signature through its full confirmation lifecycle.
+
+**Primary path:** Three `connection.onSignature()` WebSocket subscriptions per tx (processed / confirmed / finalized). Events arrive within milliseconds of the on-chain state change.
+
+**Fallback:** `getSignatureStatuses` RPC poll every 5 seconds — catches events missed during WebSocket disconnections and drives drop detection.
 
 States: `submitted → processed → confirmed → finalized` (or `failed` / `dropped`)
 
-Records a real slot number and Unix timestamp at each transition. These are the values you cross-reference on [Solscan](https://solscan.io) or [SolanaFM](https://solana.fm).
+Each state transition records a real slot number and Unix timestamp. Failures are classified by type — see [Failure Cases](#failure-cases) below.
 
 ```ts
 const tracker = new LifecycleTracker(connection);
@@ -79,6 +90,7 @@ tracker.track(signature, submittedSlot);
 tracker.on("confirmed", (tx) => { /* tx.confirmedSlot, tx.confirmedAt */ });
 tracker.on("finalized", (tx) => { /* tx.finalizedSlot */ });
 tracker.on("dropped", (tx)  => { /* no confirmation after 150 slots */ });
+tracker.on("failed",  (tx)  => { /* tx.failureType, tx.error */ });
 ```
 
 ### `src/bundle/` — Jito Bundle Submitter
@@ -86,12 +98,12 @@ tracker.on("dropped", (tx)  => { /* no confirmation after 150 slots */ });
 Builds and submits versioned transaction bundles to the Jito block engine. Automatically:
 - Fetches live tip accounts from the block engine
 - Selects one at random (distributes tip load)
-- Appends a tip transaction using a `confirmed` blockhash
+- Uses the shared blockhash passed by the caller — the same blockhash used to sign the user tx, ensuring both expire at the same slot
 - Subscribes to the block engine's result stream for accepted/rejected callbacks
 
 ```ts
 const submitter = new BundleSubmitter(connection, payer, blockEngineUrl);
-const submission = await submitter.submit(transactions, tipLamports, currentSlot);
+const submission = await submitter.submit(transactions, tipLamports, currentSlot, blockhash);
 submitter.on("accepted", (result) => { /* result.uuid */ });
 submitter.on("rejected", (result) => { /* result.reason */ });
 ```
@@ -100,13 +112,14 @@ submitter.on("rejected", (result) => { /* result.reason */ });
 
 The only component that makes autonomous decisions. Before each bundle submission, the agent:
 
-1. Samples the balances of 4 Jito tip accounts (a proxy for recent tip volume)
-2. Calculates slots until the next Jito leader window
-3. Derives a congestion signal (`low` / `medium` / `high`)
-4. Calls **Claude Haiku** (`claude-haiku-4-5-20251001`) with a structured prompt containing all of the above — this is the AI agent layer, not a heuristic wrapper
-5. Parses the model's JSON response into a `TipDecision` with explicit reasoning
+1. Calls `getRecentPrioritizationFees()` to sample network-wide fee pressure over the last ~150 slots
+2. Takes the P75 value as a congestion signal (`low` / `medium` / `high`)
+3. Calculates slots until the next Jito leader window
+4. Calls **Claude Haiku** (`claude-haiku-4-5-20251001`) via a system+user message split with a 4-second timeout
+5. Validates the JSON response at runtime (type, NaN, range, enum) before using it
+6. Enforces the configured tip floor
 
-The model's decision rationale is logged on every submission. The tip floor is enforced after parsing to prevent the model from going below the configured minimum.
+The model's decision rationale is logged on every submission. Floor enforcement applies after validation.
 
 ```ts
 const agent = new TipAgent(connection, anthropicApiKey, tipFloorLamports);
@@ -114,6 +127,18 @@ const context = await agent.gatherContext(currentSlot, nextLeaderSlot);
 const decision = await agent.decide(context);
 // decision.tipLamports, decision.reasoning, decision.confidence
 ```
+
+### `src/errors.ts` — Failure Classifier
+
+Parses raw Solana `TransactionError` objects into typed `FailureType` values:
+
+| `FailureType`       | Solana error              |
+|---------------------|---------------------------|
+| `blockhash_expired` | `BlockhashNotFound`       |
+| `fee_too_low`       | `InsufficientFundsForFee` |
+| `compute_exceeded`  | `InstructionError[*, ComputationalBudgetExceeded]` |
+| `bundle_rejected`   | block engine rejection    |
+| `dropped`           | no confirmation in 150 slots |
 
 ---
 
@@ -123,17 +148,17 @@ const decision = await agent.decide(context);
 pnpm install
 cp .env.example .env
 # Fill in .env — see steps below
-pnpm demo   # end-to-end test run (~0.002 SOL)
-pnpm dev    # run the full stack continuously
+pnpm demo   # end-to-end test run (~0.002 SOL per attempt)
+pnpm dev    # continuous monitoring mode
 ```
 
 ### Devnet
 
-The Yellowstone slot stream and lifecycle tracker work against any Solana cluster. Jito bundle submission requires mainnet — the Jito block engine does not operate on devnet. To test the stream and tracker without spending SOL, point `RPC_URL` and `GEYSER_ENDPOINT` at a devnet Geyser provider and comment out the bundle submission step in `src/demo.ts`.
+The Yellowstone slot stream and lifecycle tracker work against any Solana cluster. **Jito bundle submission requires mainnet** — the Jito block engine does not operate on devnet. To test the stream and tracker without spending SOL, point `RPC_URL` and `GEYSER_ENDPOINT` at a devnet Geyser provider and comment out the bundle submission block in `src/demo.ts`.
 
 ### Step 1 — Geyser endpoint
 
-STFU requires a [Yellowstone gRPC](https://github.com/rpcpool/yellowstone-grpc) endpoint. The public Solana RPC does not provide one. Auth is required by every hosted provider.
+STFU requires a [Yellowstone gRPC](https://github.com/rpcpool/yellowstone-grpc) endpoint. The public Solana RPC does not provide one.
 
 | Provider | Notes |
 |---|---|
@@ -149,7 +174,7 @@ RPC_URL=https://your-region.helius-rpc.com/?api-key=YOUR_KEY
 
 ### Step 2 — Wallet
 
-You need a mainnet wallet funded with at least **0.003 SOL** (tip + transaction fee + buffer). Generate one using the project's own runtime:
+You need a mainnet wallet funded with at least **0.003 SOL per run** (tip + transaction fee + buffer). Generate one:
 
 ```bash
 node --input-type=module << 'EOF'
@@ -161,15 +186,13 @@ console.log("Private key:", bs58.encode(kp.secretKey));
 EOF
 ```
 
-Fund the public key from an exchange or another wallet, then add to `.env`:
+Fund the public key, then add to `.env`:
 
 ```
 WALLET_PRIVATE_KEY=<base58 private key>
 ```
 
 ### Step 3 — Remaining config
-
-The Jito block engine URL is fixed for mainnet — no account or registration needed. The Anthropic API key is used exclusively by the AI tip agent (`src/agent/`) to reason about network conditions.
 
 ```
 JITO_BLOCK_ENGINE_URL=mainnet.block-engine.jito.wtf
@@ -185,16 +208,28 @@ TIP_FLOOR_LAMPORTS=1000000
 | `GEYSER_TOKEN` | ✓ | Auth token — required by all hosted Geyser providers |
 | `RPC_URL` | — | Solana RPC URL (defaults to mainnet public) |
 | `JITO_BLOCK_ENGINE_URL` | — | Block engine host (default: `mainnet.block-engine.jito.wtf`) |
-| `WALLET_PRIVATE_KEY` | ✓ | Base58-encoded private key, min 0.003 SOL balance |
+| `WALLET_PRIVATE_KEY` | ✓ | Base58-encoded private key, min 0.003 SOL per run |
 | `ANTHROPIC_API_KEY` | ✓ | Used by the AI tip agent to call Claude Haiku |
 | `TIP_FLOOR_LAMPORTS` | — | Minimum tip in lamports (default: 1,000,000 = 0.001 SOL) |
 
 ---
 
+## Running Tests
+
+```bash
+pnpm test          # run all tests once
+pnpm test:watch    # watch mode
+pnpm lint          # ESLint
+pnpm typecheck     # TypeScript type check only
+```
+
+---
+
 ## Lifecycle Logs
 
-Every completed bundle run (successful or failed) is written as a JSON record to `logs/lifecycle-<timestamp>.ndjson`. Each line is one transaction:
+Every bundle run (successful or failed) is written as a JSON record to `logs/lifecycle-<timestamp>.ndjson`. Each line is one transaction:
 
+**Successful record:**
 ```json
 {
   "signature": "3xKf...",
@@ -208,18 +243,54 @@ Every completed bundle run (successful or failed) is written as a JSON record to
   "finalizedAt": 1748736014000,
   "finalizedSlot": 327841140,
   "tipLamports": 1500000,
-  "agentReasoning": "Medium congestion with leader 13 slots away — 1.5× floor is sufficient"
+  "agentReasoning": "Medium congestion with leader 13 slots away — 1.5× floor is sufficient",
+  "_loggedAt": "2025-01-15T10:30:00.000Z"
 }
 ```
 
-> Sample only — see `logs/` for real run output. Slot numbers in actual records are verifiable on [Solscan](https://solscan.io) and [SolanaFM](https://solana.fm).
+**Failed record (dropped — low tip):**
+```json
+{
+  "signature": "7mPq...",
+  "status": "dropped",
+  "failureType": "dropped",
+  "submittedAt": 1748736100000,
+  "submittedSlot": 327841250,
+  "tipLamports": 1000,
+  "agentReasoning": "Parse failure — defaulting to floor tip",
+  "_loggedAt": "2025-01-15T10:31:45.000Z"
+}
+```
 
-**Triggering failure cases** for the log:
+**Failed record (blockhash expired):**
+```json
+{
+  "signature": "9nRt...",
+  "status": "failed",
+  "failureType": "blockhash_expired",
+  "error": "{\"BlockhashNotFound\":null}",
+  "submittedAt": 1748736200000,
+  "submittedSlot": 327841400,
+  "tipLamports": 1000000,
+  "agentReasoning": "Low congestion, tipping at floor",
+  "_loggedAt": "2025-01-15T10:33:20.000Z"
+}
+```
 
-| Failure | How to produce | Time to manifest |
-|---|---|---|
-| `dropped` | Set `TIP_FLOOR_LAMPORTS=1000` (below Jito's ~1000 lamport effective floor) — the bundle is silently ignored and marked dropped after 150 slots | ~60 seconds — expected, not a hang |
-| `rejected` | Submit a bundle with a stale blockhash by adding a `sleep` before `sendBundle` — the block engine returns an immediate rejection | Immediate |
+> Slot numbers in real records are verifiable on [Solscan](https://solscan.io) and [SolanaFM](https://solana.fm).
+
+---
+
+## Failure Cases
+
+| Failure | `failureType` | How to reproduce | Time to manifest |
+|---|---|---|---|
+| `dropped` | `dropped` | Set `TIP_FLOOR_LAMPORTS=1000` — below Jito's effective floor | ~60 s (150 slots) |
+| `blockhash_expired` | `blockhash_expired` | Add a 90-second `sleep` before `sendBundle` in `bundle/index.ts` | Immediate from block engine |
+| `bundle_rejected` | `bundle_rejected` | Submit a bundle with a duplicate or malformed tx | Immediate |
+| `fee_too_low` | `fee_too_low` | Submit a tx with zero `computeUnitPrice` during high congestion | Within a few seconds |
+
+The demo retries automatically on `dropped` and `bundle_rejected` outcomes (up to `MAX_RETRIES = 3`), refreshing the blockhash and re-running the tip agent on each attempt.
 
 ---
 
@@ -233,7 +304,7 @@ A short delta (under 1 second) is normal on a healthy network. A long delta mean
 
 ### Why do we never use `finalized` commitment when fetching a blockhash?
 
-`finalized` lags the current tip of the chain by approximately 32 slots — roughly 13 seconds at 400ms per slot. A blockhash is valid for 150 slots (~60 seconds), so fetching a finalized blockhash is not immediately fatal, but it creates a time pressure problem: by the time you build, sign, and submit the transaction, a meaningful fraction of the blockhash's valid window has already elapsed. Under any latency or retry scenario, you risk submitting a transaction with an expired blockhash.
+`finalized` lags the current tip of the chain by approximately 32 slots — roughly 13 seconds at 400 ms per slot. A blockhash is valid for 150 slots (~60 seconds), so fetching a finalized blockhash is not immediately fatal, but it creates a time pressure problem: by the time you build, sign, and submit the transaction, a meaningful fraction of the blockhash's valid window has already elapsed. Under any latency or retry scenario, you risk submitting a transaction with an expired blockhash.
 
 Use `confirmed` instead. It is only 1–2 slots behind the processed tip, well within safety margin, and confirmed blocks have already passed the supermajority vote threshold so they will not be rolled back under normal conditions.
 
@@ -241,7 +312,7 @@ Use `confirmed` instead. It is only 1–2 slots behind the processed tip, well w
 
 Jito bundles are only eligible for inclusion in a specific leader's slot — they are submitted to the block engine with the expectation that the scheduled Jito-connected leader will pick them up. If that leader skips their slot (fails to produce a block), the bundle is silently dropped. The block engine does not requeue it.
 
-STFU detects this via the `SlotStream`: if the slot assigned to the next Jito leader advances past that leader's window without a corresponding block, the `LifecycleTracker` marks all associated signatures as `dropped` (no processed confirmation within 150 slots). The correct recovery is to re-query `getNextScheduledLeader`, rebuild the bundle against a fresh `confirmed` blockhash, re-run the tip agent for updated context, and resubmit.
+STFU detects this via the `SlotStream`: if the slot assigned to the next Jito leader advances past that leader's window without a corresponding block, the `LifecycleTracker` marks all associated signatures as `dropped` (no processed confirmation within 150 slots). The correct recovery is to re-query `getNextScheduledLeader`, rebuild the bundle against a fresh `confirmed` blockhash, re-run the tip agent for updated context, and resubmit — which is exactly what the retry loop in `src/demo.ts` does.
 
 ---
 
