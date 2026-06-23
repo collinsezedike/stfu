@@ -2,15 +2,19 @@
 
 A production-grade Solana transaction infrastructure stack. STFU streams live slot data from a Geyser node, submits transaction bundles through Jito, tracks every bundle from submission to finality, and uses an AI agent to decide optimal tip amounts based on real-time network fee pressure.
 
-**[Architecture Diagram →](https://excalidraw.com/#json=h0ka_xlD1SB5ggnJs99jO,yAPkRJnV_OxLaTDPQ4Q5Cw)**
-
 > **Mainnet only.** The Jito block engine does not operate on devnet. The Yellowstone slot stream and lifecycle tracker work on any cluster, but bundle submission requires mainnet. See [Devnet](#devnet) for partial testing options.
 
 ---
 
 ## Architecture
 
-![STFU Architecture](architecture.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="architecture-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="architecture.svg">
+  <img src="architecture.svg" alt="STFU Architecture">
+</picture>
+
+[Interactive diagram →](https://excalidraw.com/#json=h0ka_xlD1SB5ggnJs99jO,yAPkRJnV_OxLaTDPQ4Q5Cw)
 
 **Data flow:**
 1. `SlotStream` opens a Yellowstone gRPC subscription and emits typed slot events
